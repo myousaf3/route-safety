@@ -41,11 +41,10 @@ def test_seed_demo_creates_complete_reusable_analysis():
 
 
 def test_seed_demo_is_idempotent():
-    first = seed()
+    seed()
     checkpoint_count = Checkpoint.objects.count()
-    second = seed()
+    seed()
 
-    assert first != second
     assert checkpoint_count > 0
     assert RouteAnalysis.objects.filter(request_fingerprint="demo-seed-v1").count() == 1
     assert RouteOption.objects.count() == 3

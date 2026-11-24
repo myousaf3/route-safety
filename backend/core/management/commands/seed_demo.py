@@ -17,14 +17,23 @@ from django.utils.dateparse import parse_datetime
 
 from core.models import Checkpoint, RouteAnalysis, RouteOption
 
-DEMO_FINGERPRINT = "demo-seed-v1"
+DEMO_FINGERPRINT_PREFIX = "demo-seed-v1"
 FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "demo_analysis.json"
 
 
 class Command(BaseCommand):
-    help = "Seed a deterministic demo analysis for walkthroughs and offline demos."
+    help = "Seed deterministic demo analyses for walkthroughs and offline demos."
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--count",
+            type=int,
+            default=1,
+            help="Number of demo analyses to seed (default: 1).",
+        )
 
     def handle(self, *args, **options):
+        count = max(1, int(options["count"]))
         if not FIXTURE_PATH.exists():
             raise CommandError(f"Demo fixture not found: {FIXTURE_PATH}")
 
@@ -39,87 +48,97 @@ class Command(BaseCommand):
             departure = timezone.make_aware(departure)
 
         with transaction.atomic():
-            RouteAnalysis.objects.filter(request_fingerprint=DEMO_FINGERPRINT).delete()
+            RouteAnalysis.objects.filter(
+                request_fingerprint__startswith=DEMO_FINGERPRINT_PREFIX
+            ).delete()
 
-            analysis = RouteAnalysis.objects.create(
-                origin_query=origin["query"],
-                destination_query=destination["query"],
-                origin_label=origin["label"],
-                destination_label=destination["label"],
-                origin_lat=origin["lat"],
-                origin_lon=origin["lon"],
-                destination_lat=destination["lat"],
-                destination_lon=destination["lon"],
-                origin_timezone=origin["timezone"],
-                destination_timezone=destination["timezone"],
-                departure_utc=departure,
-                load_weight_lb=request["load_weight_lb"],
-                spacing_miles=request["spacing_miles"],
-                status=payload["status"],
-                travel_advisory=payload["travel_advisory"],
-                providers=payload["providers"],
-                limitations=[
-                    *payload.get("limitations", []),
-                    "Seeded demo snapshot captured from a live provider run; "
-                    "forecasts and traffic have changed since capture.",
-                ],
-                risk_policy_version=payload["risk_policy_version"],
-                request_fingerprint=DEMO_FINGERPRINT,
-            )
-
-            recommended_id: int | None = None
-            for route_data in payload["routes"]:
-                route = RouteOption.objects.create(
-                    analysis=analysis,
-                    sequence=route_data["sequence"],
-                    rank=route_data["rank"],
-                    recommended=route_data["recommended"],
-                    disqualified=route_data["disqualified"],
-                    distance_miles=route_data["distance_miles"],
-                    duration_seconds=route_data["duration_seconds"],
-                    eta_utc=parse_datetime(route_data["eta_utc"]),
-                    geometry=route_data["geometry"],
-                    metrics=route_data["metrics"],
-                    hourly_risk=route_data["heatmap"],
-                    provider=route_data["provider"],
-                    costing=route_data["costing"],
-                    provider_route_index=route_data["sequence"],
+            base_time = timezone.now()
+            for index in range(1, count + 1):
+                fingerprint = (
+                    DEMO_FINGERPRINT_PREFIX
+                    if count == 1
+                    else f"{DEMO_FINGERPRINT_PREFIX}-{index:03d}"
                 )
-                if route_data["recommended"]:
-                    recommended_id = route.id
+                analysis = RouteAnalysis.objects.create(
+                    origin_query=origin["query"],
+                    destination_query=destination["query"],
+                    origin_label=origin["label"],
+                    destination_label=destination["label"],
+                    origin_lat=origin["lat"],
+                    origin_lon=origin["lon"],
+                    destination_lat=destination["lat"],
+                    destination_lon=destination["lon"],
+                    origin_timezone=origin["timezone"],
+                    destination_timezone=destination["timezone"],
+                    departure_utc=departure,
+                    load_weight_lb=request["load_weight_lb"],
+                    spacing_miles=request["spacing_miles"],
+                    status=payload["status"],
+                    travel_advisory=payload["travel_advisory"],
+                    providers=payload["providers"],
+                    limitations=[
+                        *payload.get("limitations", []),
+                        f"Seeded demo snapshot {index} of {count} captured from a live "
+                        "provider run; forecasts and traffic have changed since capture.",
+                    ],
+                    risk_policy_version=payload["risk_policy_version"],
+                    request_fingerprint=fingerprint,
+                )
 
-                checkpoints = []
-                for spacing, rows in route_data["checkpoints"].items():
-                    for row in rows:
-                        checkpoints.append(
-                            Checkpoint(
-                                route=route,
-                                spacing_miles=int(spacing),
-                                sequence=row["sequence"],
-                                cumulative_miles=row["cumulative_miles"],
-                                lat=row["lat"],
-                                lon=row["lon"],
-                                eta_utc=parse_datetime(row["eta_utc"]),
-                                timezone=row["timezone"],
-                                weather=row["weather"],
-                                weather_status=row["weather_status"],
-                                base_risk=row["base_risk"],
-                                risk=row["risk"],
-                                risk_label=row["risk_label"],
-                                reasons=row["reasons"],
+                recommended_id: int | None = None
+                for route_data in payload["routes"]:
+                    route = RouteOption.objects.create(
+                        analysis=analysis,
+                        sequence=route_data["sequence"],
+                        rank=route_data["rank"],
+                        recommended=route_data["recommended"],
+                        disqualified=route_data["disqualified"],
+                        distance_miles=route_data["distance_miles"],
+                        duration_seconds=route_data["duration_seconds"],
+                        eta_utc=parse_datetime(route_data["eta_utc"]),
+                        geometry=route_data["geometry"],
+                        metrics=route_data["metrics"],
+                        hourly_risk=route_data["heatmap"],
+                        provider=route_data["provider"],
+                        costing=route_data["costing"],
+                        provider_route_index=route_data["sequence"],
+                    )
+                    if route_data["recommended"]:
+                        recommended_id = route.id
+
+                    checkpoints = []
+                    for spacing, rows in route_data["checkpoints"].items():
+                        for row in rows:
+                            checkpoints.append(
+                                Checkpoint(
+                                    route=route,
+                                    spacing_miles=int(spacing),
+                                    sequence=row["sequence"],
+                                    cumulative_miles=row["cumulative_miles"],
+                                    lat=row["lat"],
+                                    lon=row["lon"],
+                                    eta_utc=parse_datetime(row["eta_utc"]),
+                                    timezone=row["timezone"],
+                                    weather=row["weather"],
+                                    weather_status=row["weather_status"],
+                                    base_risk=row["base_risk"],
+                                    risk=row["risk"],
+                                    risk_label=row["risk_label"],
+                                    reasons=row["reasons"],
+                                )
                             )
-                        )
-                Checkpoint.objects.bulk_create(checkpoints)
+                    Checkpoint.objects.bulk_create(checkpoints)
 
-            analysis.recommended_route_id = recommended_id
-            analysis.save(update_fields=["recommended_route"])
-            # Make the demo the most recent history entry without changing the snapshot data.
-            RouteAnalysis.objects.filter(pk=analysis.pk).update(created_at=timezone.now())
+                analysis.recommended_route_id = recommended_id
+                analysis.save(update_fields=["recommended_route"])
+                # Stagger created_at so history ordering is stable and readable.
+                RouteAnalysis.objects.filter(pk=analysis.pk).update(
+                    created_at=base_time - timezone.timedelta(minutes=count - index)
+                )
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Seeded demo analysis {analysis.id} "
-                f"({origin['query']} → {destination['query']}) with "
-                f"{len(payload['routes'])} routes."
+                f"Seeded {count} demo analyses ({origin['query']} → {destination['query']}) "
+                f"with {len(payload['routes'])} routes each."
             )
         )
