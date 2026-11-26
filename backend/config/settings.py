@@ -6,9 +6,20 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+try:  # optional: lets local .env/.env.local files populate os.environ
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
 import dj_database_url
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load Neon/docker-compose env files without overriding the process environment.
+if load_dotenv is not None:
+    for _candidate in (BASE_DIR.parent / ".env.local", BASE_DIR.parent / ".env", BASE_DIR / ".env"):
+        if _candidate.is_file():
+            load_dotenv(_candidate, override=False)
 
 
 def env_bool(name: str, default: bool) -> bool:

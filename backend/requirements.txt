@@ -4,6 +4,7 @@ django-cors-headers>=4.4,<5
 drf-spectacular>=0.28,<0.29
 djangorestframework-simplejwt>=5.3,<5.4
 dj-database-url>=2.2,<3
+python-dotenv>=1.0,<2
 celery>=5.4,<5.5
 redis>=5.0,<6
 requests>=2.32,<3
