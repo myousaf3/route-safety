@@ -27,7 +27,7 @@ def env_secret(name: str, default: str = "") -> str:
     return os.getenv(name, default)
 
 
-SECRET_KEY = env_secret("DJANGO_SECRET_KEY", "dev-only-not-a-secret-change-me")
+SECRET_KEY = env_secret("DJANGO_SECRET_KEY", "dev-only-not-a-secret-change-me-32chars")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()

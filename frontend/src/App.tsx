@@ -4,17 +4,30 @@ import { ApiError, getAnalysis, listAnalyses } from "./lib/api";
 import type { Analysis } from "./types";
 import RouteForm from "./components/RouteForm";
 import HistoryPanel from "./components/HistoryPanel";
-import AuthPanel from "./components/AuthPanel";
+import AccountControl from "./components/AccountControl";
+import AuthPage from "./components/AuthPage";
+import type { AuthMode } from "./components/AuthPage";
 import AnalysisResults from "./components/AnalysisResults";
 import EmptyState from "./components/EmptyState";
 import Brand from "./components/Brand";
+
+type Route = { name: "app" } | { name: "auth"; mode: AuthMode };
 
 function readHashId(): string | null {
   const match = window.location.hash.match(/^#\/?analysis\/([0-9a-f-]{36})$/i);
   return match ? match[1] : null;
 }
 
+/** Minimal hash router: the app shell plus the standalone auth page. */
+function readRoute(): Route {
+  const hash = window.location.hash.replace(/\/+$/, "");
+  if (hash === "#/register") return { name: "auth", mode: "register" };
+  if (hash === "#/login") return { name: "auth", mode: "login" };
+  return { name: "app" };
+}
+
 export default function App() {
+  const [route, setRoute] = useState<Route>(readRoute);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<ApiError | null>(null);
@@ -59,6 +72,21 @@ export default function App() {
     if (id) void loadById(id);
   }, [loadById]);
 
+  // Keep the rendered page in sync with manual hash navigation (back/forward,
+  // direct links to #/login or #/register, and deep links to an analysis).
+  useEffect(() => {
+    const handleHashChange = () => {
+      const next = readRoute();
+      setRoute(next);
+      if (next.name === "app") {
+        const id = readHashId();
+        if (id) void loadById(id);
+      }
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, [loadById]);
+
   // Poll queued/running analyses until they reach a terminal state.
   useEffect(() => {
     if (!analysis || ["completed", "partial", "failed"].includes(analysis.status)) {
@@ -90,19 +118,37 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  const openAuth = useCallback((mode: AuthMode) => {
+    window.location.hash = mode === "register" ? "#/register" : "#/login";
+    setRoute({ name: "auth", mode });
+    window.scrollTo({ top: 0 });
+  }, []);
+
+  const closeAuth = useCallback(() => {
+    window.location.hash = "";
+    setRoute({ name: "app" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
+  if (route.name === "auth") {
+    return <AuthPage mode={route.mode} onModeChange={openAuth} onDone={closeAuth} />;
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
         <Brand />
-        <div className="topbar-meta">
-          <span className="topbar-chip">ETA-aware forecast sampling</span>
-          <span className="topbar-chip">0–48h corridor heatmap</span>
+        <div className="topbar-actions">
+          <div className="topbar-meta">
+            <span className="topbar-chip">ETA-aware forecast sampling</span>
+            <span className="topbar-chip">0–48h corridor heatmap</span>
+          </div>
+          <AccountControl />
         </div>
       </header>
 
       <div className="layout">
         <aside className="sidebar" aria-label="Route request and history">
-          <AuthPanel />
           <RouteForm onCreated={handleCreated} />
           <HistoryPanel
             items={history.data?.results ?? []}

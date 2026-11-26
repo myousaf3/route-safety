@@ -28,7 +28,9 @@ recommends the least hazardous route.
   excluded from average risk rather than counted as zero.
 - **Asynchronous jobs**: long analyses run in Celery workers; the API returns `202 Accepted`
   and the UI polls until the job reaches a terminal state.
-- **Token auth**: JWT registration/login/refresh plus an account panel in the UI.
+- **Token auth**: JWT registration/login/refresh with a dedicated auth page (`#/login`,
+  `#/register`), an account control in the header, automatic access-token refresh, and
+  owner-scoped history.
 
 ## Stack
 
@@ -126,6 +128,22 @@ Base path: `/api/v1`.
 | `GET` | `/analyses/` | Cursor-paginated history (scoped to the authenticated user when signed in) |
 | `GET` | `/analyses/{uuid}/` | Saved analysis detail (poll until terminal) |
 | `DELETE` | `/analyses/{uuid}/` | Delete a saved analysis |
+
+Anonymous callers can create and read anonymous analyses; signed-in users additionally see their
+own analyses. Private analyses return `404` to other users so history stays account-scoped.
+
+### Frontend routes
+
+| Route | Screen |
+| --- | --- |
+| `/` | Route form, saved history, and analysis results |
+| `#/login` | Standalone sign-in page |
+| `#/register` | Standalone account-creation page |
+| `#/analysis/{uuid}` | Deep link to a saved analysis |
+
+The auth page stores JWTs in `localStorage`, attaches the access token as a bearer header,
+refreshes it automatically, and returns the user to the app when complete. The header account
+control shows the current user and supports sign-out. Anonymous analyses remain available.
 
 ### Other
 
@@ -234,12 +252,12 @@ backend/
     management/commands/  seed_demo, cleanup_analyses
     services/             geocoding, routing, weather, risk, geo, analysis pipeline
     tasks.py              Celery analysis jobs
-    tests/                risk, geo, pipeline, API, seed tests
+    tests/                risk, geo, pipeline, API, auth, seed tests
   requirements*.txt
 frontend/
   src/
-    components/           form, history, auth, route cards, map, inspector, results
-    lib/                  API client, formatting and risk helpers
+    components/           AuthPage, account control, form, history, route cards, map, inspector
+    lib/                  API client, session/auth, formatting and risk helpers
   deploy/nginx.conf       SPA + API reverse proxy, rate limits, TLS hooks
 docs/
   WALKTHROUGH.md          five-to-ten minute demo script
@@ -257,7 +275,8 @@ docker-compose.monitoring.yml  Prometheus + Grafana
 
 - **Synchronous API contract is now async**: clients must poll `GET /analyses/{id}/` until the
   status is `completed`, `partial`, or `failed`.
-- **No auth required for demo**: anonymous analyses still work; signing in scopes history.
+- **No auth required for demo**: anonymous analyses still work; signing in scopes history to the
+  account. Account history is private: anonymous callers only see anonymous analyses.
 - **Public free providers**: no API keys, but availability and rate limits are outside our control.
   Adapters isolate providers so a commercial routing or weather API can be swapped in.
 - **Forecast advisory, not a road report**: the score does not model closures, chain controls,

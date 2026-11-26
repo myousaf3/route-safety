@@ -6,7 +6,7 @@ import logging
 
 from django.core.cache import cache
 from django.db import connection
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from drf_spectacular.types import OpenApiTypes
@@ -37,6 +37,19 @@ from core.tasks import process_analysis_task
 logger = logging.getLogger(__name__)
 
 
+def _visible_analyses(request):
+    """Analyses the caller may read or delete.
+
+    Signed-in users see their own analyses plus anonymous ones; anonymous
+    callers only see anonymous analyses so account history stays private.
+    """
+
+    queryset = RouteAnalysis.objects.all()
+    if request.user.is_authenticated:
+        return queryset.filter(Q(owner=request.user) | Q(owner__isnull=True))
+    return queryset.filter(owner__isnull=True)
+
+
 class AnalysisCreateThrottle(ScopedRateThrottle):
     scope = "analysis"
 
@@ -44,6 +57,7 @@ class AnalysisCreateThrottle(ScopedRateThrottle):
 class AnalysisListCreateView(APIView):
     @extend_schema(
         summary="List saved analyses",
+        operation_id="list_analyses",
         parameters=[
             OpenApiParameter("status", str, description="Filter by analysis status"),
             OpenApiParameter("cursor", str, description="Cursor pagination token"),
@@ -54,12 +68,10 @@ class AnalysisListCreateView(APIView):
     )
     def get(self, request):
         queryset = (
-            RouteAnalysis.objects.select_related("recommended_route")
+            _visible_analyses(request)
+            .select_related("recommended_route")
             .annotate(route_count=Count("routes"))
-            .all()
         )
-        if request.user.is_authenticated:
-            queryset = queryset.filter(owner__in=[request.user, None])
         status_filter = request.query_params.get("status")
         if status_filter:
             if status_filter not in RouteAnalysis.Status.values:
@@ -82,6 +94,7 @@ class AnalysisListCreateView(APIView):
 
     @extend_schema(
         summary="Create and run a route safety analysis",
+        operation_id="create_analysis",
         request=AnalysisRequestSerializer,
         responses={
             201: OpenApiResponse(description="Completed analysis with routes and checkpoints"),
@@ -125,25 +138,27 @@ class AnalysisListCreateView(APIView):
 class AnalysisDetailView(APIView):
     @extend_schema(
         summary="Get a saved analysis",
+        operation_id="get_analysis",
         responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
         tags=["analyses"],
     )
     def get(self, request, pk):
         analysis = get_object_or_404(
-            RouteAnalysis.objects.select_related("recommended_route").prefetch_related(
-                "routes__checkpoints"
-            ),
+            _visible_analyses(request)
+            .select_related("recommended_route")
+            .prefetch_related("routes__checkpoints"),
             pk=pk,
         )
         return Response(analysis_detail_payload(analysis))
 
     @extend_schema(
         summary="Delete a saved analysis",
+        operation_id="delete_analysis",
         responses={204: None, 404: OpenApiTypes.OBJECT},
         tags=["analyses"],
     )
     def delete(self, request, pk):
-        analysis = get_object_or_404(RouteAnalysis, pk=pk)
+        analysis = get_object_or_404(_visible_analyses(request), pk=pk)
         analysis.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -253,6 +268,11 @@ class HealthLiveView(APIView):
     authentication_classes = []
     throttle_classes = []
 
+    @extend_schema(
+        summary="Liveness probe",
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["ops"],
+    )
     def get(self, request):
         return Response({"status": "ok", "service": "route-safety-api"})
 
@@ -262,6 +282,11 @@ class HealthReadyView(APIView):
     authentication_classes = []
     throttle_classes = []
 
+    @extend_schema(
+        summary="Readiness probe (database + cache)",
+        responses={200: OpenApiTypes.OBJECT, 503: OpenApiTypes.OBJECT},
+        tags=["ops"],
+    )
     def get(self, request):
         checks: dict[str, str] = {}
         ready = True
@@ -291,5 +316,10 @@ class MetricsView(APIView):
     authentication_classes = []
     throttle_classes = []
 
+    @extend_schema(
+        summary="Prometheus metrics",
+        responses={200: OpenApiResponse(response=OpenApiTypes.STR)},
+        tags=["ops"],
+    )
     def get(self, request):
         return HttpResponse(render_metrics(), content_type="text/plain; version=0.0.4")

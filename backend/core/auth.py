@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -11,6 +13,13 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
+
+
+class TokenPairSerializer(serializers.Serializer):
+    """Response shape for registration and login."""
+
+    access = serializers.CharField(read_only=True)
+    refresh = serializers.CharField(read_only=True)
 
 
 class RegisterSerializer(serializers.Serializer):
@@ -38,6 +47,16 @@ class RegisterSerializer(serializers.Serializer):
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Create an account",
+        description=(
+            "Create a driver account and return a JWT access/refresh pair. "
+            "Passwords must pass Django's configured password validators."
+        ),
+        request=RegisterSerializer,
+        responses={201: TokenPairSerializer, 400: OpenApiTypes.OBJECT},
+        tags=["auth"],
+    )
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -50,6 +69,12 @@ class RegisterView(APIView):
 
 
 class MeView(APIView):
+    @extend_schema(
+        summary="Current user",
+        description="Return the authenticated user, or `authenticated: false` when anonymous.",
+        responses={200: OpenApiTypes.OBJECT},
+        tags=["auth"],
+    )
     def get(self, request):
         if not request.user.is_authenticated:
             return Response({"authenticated": False})

@@ -5,6 +5,7 @@ import type {
   Place,
   Policy,
 } from "../types";
+import { clearSession, getAccessToken, getRefreshToken, saveTokens } from "./auth";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? "/api/v1";
 
@@ -35,11 +36,44 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * Exchange the stored refresh token for a new access token.
+ *
+ * Uses a bare fetch (not `request`) so a failed refresh can never recurse
+ * through the 401 retry path.
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  const refresh = getRefreshToken();
+  if (!refresh) return null;
+  try {
+    const response = await fetch(`${API_BASE}/auth/token/refresh/`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh }),
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { access?: string; refresh?: string };
+    if (!body.access) return null;
+    saveTokens({ access: body.access, refresh: body.refresh });
+    return body.access;
+  } catch {
+    return null;
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit, allowRefresh = true): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
   if (init?.body) headers.set("Content-Type", "application/json");
-  const token = localStorage.getItem("spotter_access_token");
+
+  const isAuthPath = path.startsWith("/auth/");
+  let token = getAccessToken();
+  // Restore an expired session from the refresh token before the request so a
+  // returning user does not silently fall back to anonymous access.
+  if (!token && allowRefresh && !isAuthPath && getRefreshToken()) {
+    token = await refreshAccessToken();
+    if (!token) clearSession();
+  }
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   let response: Response;
@@ -51,6 +85,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       code: "network_error",
       detail: "Check your connection and confirm the Django API is running.",
     });
+  }
+
+  // Access tokens are short-lived; transparently refresh once, then retry.
+  if (response.status === 401 && allowRefresh && !path.startsWith("/auth/")) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) return request<T>(path, init, false);
+    clearSession();
   }
 
   if (response.status === 204) return undefined as T;

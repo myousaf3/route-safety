@@ -14,8 +14,8 @@ cd frontend && npm run dev
 Open <http://127.0.0.1:5173>. If providers are slow or unavailable, run
 `python manage.py seed_demo --count 5` and open an analysis from the **Saved** panel.
 
-Optional: sign in via the **Account** panel to scope history to your user. Anonymous use still
-works.
+Optional: click **Sign in** in the header to open the standalone auth page (`#/login`). Create an
+account or sign in to scope saved history to that user; anonymous use still works.
 
 ## 1. Problem framing (1 minute)
 
@@ -67,10 +67,20 @@ Use **Chicago → Denver**, departure 15:00 UTC, 42,000 lb, 25-mile detail.
   limitations (for example, fewer than three truck-costed alternatives).
 - Open **Distance-weighted risk** to show the per-severity mileage bar.
 
-## 8. Production trade-offs (1 minute)
+## 8. Accounts and security (1 minute)
 
-- Synchronous analysis is deliberate for the MVP; a worker comes later.
-- No auth and SQLite are acceptable for a single-instance assessment demo.
+- Click **Sign in** in the header. The dedicated auth page supports sign-in and account creation,
+  with client-side validation, password visibility, and field-level server errors.
+- After signing in, the header shows the account and the **Saved** panel is scoped to that user.
+  Sign out to return to anonymous mode.
+- Mention that access tokens are short-lived and refreshed automatically; the API rejects
+  anonymous access to another user's saved analyses.
+
+## 9. Production trade-offs (1 minute)
+
+- Analyses are asynchronous: the API returns `202 Accepted`, a Celery worker runs the pipeline,
+  and the UI polls until the job completes.
+- Authentication is optional for the demo; PostgreSQL, Redis, and a worker are used in production.
 - Providers are isolated behind adapters; commercial routing or weather APIs can replace them.
 - Forecasts are advisory: no closures, chain controls, visibility, ice, or driver factors.
 
