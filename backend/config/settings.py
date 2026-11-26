@@ -15,7 +15,19 @@ def env_bool(name: str, default: bool) -> bool:
     return os.getenv(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
 
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-not-a-secret-change-me")
+def env_secret(name: str, default: str = "") -> str:
+    """Read a secret from env or a Docker-secret style *_FILE path."""
+
+    file_path = os.getenv(f"{name}_FILE")
+    if file_path:
+        try:
+            return Path(file_path).read_text().strip()
+        except OSError:
+            pass
+    return os.getenv(name, default)
+
+
+SECRET_KEY = env_secret("DJANGO_SECRET_KEY", "dev-only-not-a-secret-change-me")
 DEBUG = env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = [
     host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()
@@ -194,11 +206,31 @@ LOGGING = {
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = False
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# --- Sentry (optional) -----------------------------------------------------
+SENTRY_DSN = env_secret("SENTRY_DSN", "")
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+    from sentry_sdk.integrations.django import DjangoIntegration
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration(), CeleryIntegration()],
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+        send_default_pii=False,
+        environment=os.getenv("SENTRY_ENVIRONMENT", "production" if not DEBUG else "development"),
+    )
+
 if not DEBUG:
-    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", False)
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
-    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True

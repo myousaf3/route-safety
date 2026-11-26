@@ -9,4 +9,5 @@ redis>=5.0,<6
 requests>=2.32,<3
 timezonefinder>=6.5,<7
 gunicorn>=23,<24
+sentry-sdk>=2.0,<3
 psycopg[binary]>=3.2,<3.3
