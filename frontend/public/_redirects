@@ -1,0 +1,3 @@
+# SPA fallback for Cloudflare Pages. Existing assets are served first; every
+# other path renders index.html so client-side routes (e.g. /auth) work.
+/*    /index.html    200

@@ -1,0 +1,33 @@
+# Pings the free Render web service so it does not spin down after 15 minutes
+# of inactivity, which would make the first client-demo request take ~50s.
+#
+# Set the repository variable RENDER_API_URL (Settings -> Secrets and variables
+# -> Actions -> Variables) to e.g. https://route-safety-api.onrender.com.
+# GitHub may delay scheduled runs at busy times; 10 minutes leaves a margin.
+
+name: Keep alive
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping Render health endpoint
+        env:
+          API_URL: ${{ vars.RENDER_API_URL }}
+        run: |
+          if [ -z "$API_URL" ]; then
+            echo "RENDER_API_URL is not set; skipping keep-alive ping."
+            exit 0
+          fi
+          curl --fail --silent --show-error \
+            --retry 2 --retry-delay 10 --retry-all-errors \
+            --max-time 60 \
+            "$API_URL/health/live"

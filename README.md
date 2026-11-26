@@ -96,16 +96,13 @@ docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up --build
 - Prometheus: <http://localhost:9090>
 - Grafana: <http://localhost:3000> (default `admin` / `admin`)
 
-### For a public host
+### Free client demo (Render + Neon + Cloudflare Pages)
 
-1. Set `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, and `DATABASE_URL`.
-2. Terminate TLS at the edge or in nginx (see `frontend/deploy/nginx.conf`) and set
-   `DJANGO_SECURE_SSL_REDIRECT=1`.
-3. Set `CELERY_TASK_ALWAYS_EAGER=0` and run at least one worker.
-4. If the API is served from a different origin, build the frontend with
-   `VITE_API_BASE=https://api.example.com/api/v1` and add the web origin to
-   `CORS_ALLOWED_ORIGINS`.
-5. Point the platform health check at `/health/ready`.
+The lowest-friction no-card option is documented in
+[`docs/DEPLOY_RENDER.md`](docs/DEPLOY_RENDER.md). It runs Django on Render's free tier,
+Postgres on Neon, and the React build on Cloudflare Pages, with Celery in eager mode. The
+blueprint is [`render.yaml`](render.yaml) and the keep-alive workflow is
+`.github/workflows/keepalive.yml`.
 
 ## API
 
