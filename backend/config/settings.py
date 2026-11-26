@@ -276,7 +276,6 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "31536000"))
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-
-# Health probes are called over plain HTTP by the platform (Render/Railway/Koyeb),
-# so they must not be redirected to HTTPS.
-SECURE_REDIRECT_EXEMPT = [r"^health/"]
+    # Health probes are called over plain HTTP by the platform, so they must
+    # not be redirected to HTTPS.
+    SECURE_REDIRECT_EXEMPT = [r"^health/"]
