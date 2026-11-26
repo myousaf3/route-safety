@@ -46,6 +46,12 @@ ALLOWED_HOSTS = [
 # Render injects the public hostname; trust it even when ALLOWED_HOSTS is locked down.
 if os.getenv("RENDER_EXTERNAL_HOSTNAME"):
     ALLOWED_HOSTS.append(os.environ["RENDER_EXTERNAL_HOSTNAME"])
+# Railway healthchecks use healthcheck.railway.app as Host; the public service uses
+# *.up.railway.app (or a custom domain exposed via RAILWAY_PUBLIC_DOMAIN).
+if os.getenv("RAILWAY_ENVIRONMENT"):
+    ALLOWED_HOSTS.extend([".railway.app", "healthcheck.railway.app"])
+if os.getenv("RAILWAY_PUBLIC_DOMAIN"):
+    ALLOWED_HOSTS.append(os.environ["RAILWAY_PUBLIC_DOMAIN"])
 
 INSTALLED_APPS = [
     "django.contrib.admin",
