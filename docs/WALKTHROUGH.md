@@ -12,7 +12,10 @@ cd frontend && npm run dev
 ```
 
 Open <http://127.0.0.1:5173>. If providers are slow or unavailable, run
-`python manage.py seed_demo` and open the analysis from the **Saved** panel.
+`python manage.py seed_demo --count 5` and open an analysis from the **Saved** panel.
+
+Optional: sign in via the **Account** panel to scope history to your user. Anonymous use still
+works.
 
 ## 1. Problem framing (1 minute)
 
@@ -31,7 +34,8 @@ Open <http://127.0.0.1:5173>. If providers are slow or unavailable, run
 
 Use **Chicago → Denver**, departure 15:00 UTC, 42,000 lb, 25-mile detail.
 
-- Watch the staged progress: geocoding, routes, forecasts, scoring.
+- The request returns immediately (`202 Accepted`) and the UI polls until the job is complete;
+  watch the staged progress: geocoding, routes, forecasts, scoring.
 - Mention that a cold analysis takes roughly 7–12 seconds because the public providers are
   batched and cached; the result is then persisted.
 - The deep link (`/#/analysis/<uuid>`) and history panel make the result reproducible.
