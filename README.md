@@ -104,6 +104,9 @@ Postgres on Neon, and the React build on Cloudflare Pages, with Celery in eager 
 blueprint is [`render.yaml`](render.yaml) and the keep-alive workflow is
 `.github/workflows/keepalive.yml`.
 
+If Render asks for a payment method, use the Koyeb variant instead:
+[`docs/DEPLOY_KOYEB.md`](docs/DEPLOY_KOYEB.md).
+
 ## API
 
 Base path: `/api/v1`.
