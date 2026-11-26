@@ -93,18 +93,22 @@ def _weather_coordinates(route_drafts: list[RouteDraft]) -> list[tuple[float, fl
     return list(seen.values())
 
 
-def run_analysis(
-    *,
-    origin_query: str,
-    destination_query: str,
-    departure_utc: datetime,
-    load_weight_lb: int,
-    spacing_miles: int,
-) -> RouteAnalysis:
+def _execute_analysis(analysis: RouteAnalysis) -> None:
+    origin_query = analysis.origin_query
+    destination_query = analysis.destination_query
+    departure_utc = analysis.departure_utc
+    load_weight_lb = analysis.load_weight_lb
+    spacing_miles = analysis.spacing_miles
+
     if departure_utc.tzinfo is None:
         departure_utc = departure_utc.replace(tzinfo=UTC)
     departure_utc = departure_utc.astimezone(UTC)
+    analysis.departure_utc = departure_utc
+
     _validate_departure(departure_utc)
+
+    analysis.status = RouteAnalysis.Status.ROUTING
+    analysis.save(update_fields=["status", "departure_utc"])
 
     origin = geocoding.geocode(origin_query)
     destination = geocoding.geocode(destination_query)
@@ -125,6 +129,9 @@ def run_analysis(
         load_weight_lb=load_weight_lb,
     )
     limitations = list(route_set.limitations)
+
+    analysis.status = RouteAnalysis.Status.WEATHER
+    analysis.save(update_fields=["status"])
 
     timezone_cache: dict[tuple[float, float], str] = {}
 
@@ -276,6 +283,9 @@ def run_analysis(
             "points": heatmap_points,
         }
 
+    analysis.status = RouteAnalysis.Status.SCORING
+    analysis.save(update_fields=["status"])
+
     ranked_indices = rank_routes([route.metrics for route in drafts])
     disqualified = [route.metrics.get("no_travel_miles", 0.0) > 0.01 for route in drafts]
     any_safe = any(not flag for flag in disqualified)
@@ -305,31 +315,28 @@ def run_analysis(
     status = RouteAnalysis.Status.PARTIAL if unknown_total else RouteAnalysis.Status.COMPLETED
 
     with transaction.atomic():
-        analysis = RouteAnalysis.objects.create(
-            origin_query=origin_query,
-            destination_query=destination_query,
-            origin_label=origin.label,
-            destination_label=destination.label,
-            origin_lat=origin.lat,
-            origin_lon=origin.lon,
-            destination_lat=destination.lat,
-            destination_lon=destination.lon,
-            origin_timezone=origin.timezone,
-            destination_timezone=destination.timezone,
-            departure_utc=departure_utc,
-            load_weight_lb=load_weight_lb,
-            spacing_miles=spacing_miles,
-            status=status,
-            travel_advisory=advisory,
-            providers={
-                "geocoding": "Nominatim / OpenStreetMap",
-                "routing": ", ".join(routing_labels),
-                "weather": "Open-Meteo",
-                "risk_policy_version": settings.RISK_POLICY_VERSION,
-            },
-            limitations=limitations,
-            risk_policy_version=settings.RISK_POLICY_VERSION,
-        )
+        analysis.origin_label = origin.label
+        analysis.destination_label = destination.label
+        analysis.origin_lat = origin.lat
+        analysis.origin_lon = origin.lon
+        analysis.destination_lat = destination.lat
+        analysis.destination_lon = destination.lon
+        analysis.origin_timezone = origin.timezone
+        analysis.destination_timezone = destination.timezone
+        analysis.departure_utc = departure_utc
+        analysis.load_weight_lb = load_weight_lb
+        analysis.spacing_miles = spacing_miles
+        analysis.status = status
+        analysis.travel_advisory = advisory
+        analysis.providers = {
+            "geocoding": "Nominatim / OpenStreetMap",
+            "routing": ", ".join(routing_labels),
+            "weather": "Open-Meteo",
+            "risk_policy_version": settings.RISK_POLICY_VERSION,
+        }
+        analysis.limitations = limitations
+        analysis.risk_policy_version = settings.RISK_POLICY_VERSION
+        analysis.save()
 
         route_rows: list[RouteOption] = []
         for sequence, route in enumerate(drafts):
@@ -429,6 +436,105 @@ def run_analysis(
             "unknown_checkpoints": unknown_total,
         },
     )
+    return
+
+
+def process_analysis(analysis_id) -> RouteAnalysis:
+    """Run the full pipeline for a persisted (queued) analysis.
+
+    Updates the analysis row in place and marks it FAILED on any error so callers
+    polling the API can observe the terminal state.
+    """
+
+    analysis = RouteAnalysis.objects.get(pk=analysis_id)
+    try:
+        _execute_analysis(analysis)
+    except ProblemError as exc:
+        analysis.status = RouteAnalysis.Status.FAILED
+        analysis.error = {"code": exc.code, "title": exc.title, "detail": exc.detail}
+        analysis.save(update_fields=["status", "error"])
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("analysis_failed", extra={"analysis_id": str(analysis.id)})
+        analysis.status = RouteAnalysis.Status.FAILED
+        analysis.error = {
+            "code": "analysis_failed",
+            "title": "Analysis failed",
+            "detail": str(exc),
+        }
+        analysis.save(update_fields=["status", "error"])
+        raise
+    analysis.refresh_from_db()
+    return analysis
+
+
+def create_queued_analysis(
+    *,
+    origin_query: str,
+    destination_query: str,
+    departure_utc: datetime,
+    load_weight_lb: int,
+    spacing_miles: int,
+    owner=None,
+) -> RouteAnalysis:
+    """Persist a queued analysis row for asynchronous processing."""
+
+    if departure_utc.tzinfo is None:
+        departure_utc = departure_utc.replace(tzinfo=UTC)
+    departure_utc = departure_utc.astimezone(UTC)
+    return RouteAnalysis.objects.create(
+        owner=owner,
+        origin_query=origin_query,
+        destination_query=destination_query,
+        origin_label=origin_query,
+        destination_label=destination_query,
+        origin_lat=0.0,
+        origin_lon=0.0,
+        destination_lat=0.0,
+        destination_lon=0.0,
+        origin_timezone="UTC",
+        destination_timezone="UTC",
+        departure_utc=departure_utc,
+        load_weight_lb=load_weight_lb,
+        spacing_miles=spacing_miles,
+        status=RouteAnalysis.Status.QUEUED,
+    )
+
+
+def run_analysis(
+    *,
+    origin_query: str,
+    destination_query: str,
+    departure_utc: datetime,
+    load_weight_lb: int,
+    spacing_miles: int,
+    owner=None,
+) -> RouteAnalysis:
+    """Synchronous entry point: persist a queued analysis and run it inline."""
+
+    if departure_utc.tzinfo is None:
+        departure_utc = departure_utc.replace(tzinfo=UTC)
+    departure_utc = departure_utc.astimezone(UTC)
+
+    analysis = RouteAnalysis.objects.create(
+        owner=owner,
+        origin_query=origin_query,
+        destination_query=destination_query,
+        origin_label=origin_query,
+        destination_label=destination_query,
+        origin_lat=0.0,
+        origin_lon=0.0,
+        destination_lat=0.0,
+        destination_lon=0.0,
+        origin_timezone="UTC",
+        destination_timezone="UTC",
+        departure_utc=departure_utc,
+        load_weight_lb=load_weight_lb,
+        spacing_miles=spacing_miles,
+        status=RouteAnalysis.Status.QUEUED,
+    )
+    process_analysis(analysis.id)
+    analysis.refresh_from_db()
     return analysis
 
 

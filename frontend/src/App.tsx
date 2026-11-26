@@ -4,6 +4,7 @@ import { ApiError, getAnalysis, listAnalyses } from "./lib/api";
 import type { Analysis } from "./types";
 import RouteForm from "./components/RouteForm";
 import HistoryPanel from "./components/HistoryPanel";
+import AuthPanel from "./components/AuthPanel";
 import AnalysisResults from "./components/AnalysisResults";
 import EmptyState from "./components/EmptyState";
 import Brand from "./components/Brand";
@@ -58,6 +59,19 @@ export default function App() {
     if (id) void loadById(id);
   }, [loadById]);
 
+  // Poll queued/running analyses until they reach a terminal state.
+  useEffect(() => {
+    if (!analysis || ["completed", "partial", "failed"].includes(analysis.status)) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void getAnalysis(analysis.id)
+        .then((updated) => setAnalysis(updated))
+        .catch(() => undefined);
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [analysis]);
+
   const handleCreated = useCallback(
     (created: Analysis) => {
       setAnalysis(created);
@@ -88,6 +102,7 @@ export default function App() {
 
       <div className="layout">
         <aside className="sidebar" aria-label="Route request and history">
+          <AuthPanel />
           <RouteForm onCreated={handleCreated} />
           <HistoryPanel
             items={history.data?.results ?? []}

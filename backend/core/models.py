@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 
 class RouteAnalysis(models.Model):
     """Immutable request plus the aggregated outcome of one analysis run."""
+
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="route_analyses",
+        help_text="User who requested the analysis, if authenticated.",
+    )
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"

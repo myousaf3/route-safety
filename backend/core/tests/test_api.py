@@ -84,7 +84,8 @@ def _make_analysis(*, recommended: bool = True, status: str = "completed") -> Ro
 
 def test_create_endpoint_returns_full_payload(monkeypatch):
     analysis = _make_analysis()
-    monkeypatch.setattr("core.views.run_analysis", lambda **kwargs: analysis)
+    monkeypatch.setattr("core.views.create_queued_analysis", lambda **kwargs: analysis)
+    monkeypatch.setattr("core.views.process_analysis_task.delay", lambda *args, **kwargs: None)
     client = APIClient()
 
     response = client.post(
@@ -98,7 +99,7 @@ def test_create_endpoint_returns_full_payload(monkeypatch):
         },
         format="json",
     )
-    assert response.status_code == 201
+    assert response.status_code == 202
     body = response.json()
     assert body["id"] == str(analysis.id)
     assert body["recommended_route_id"] is not None

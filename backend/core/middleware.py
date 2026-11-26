@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 
 from django.utils.deprecation import MiddlewareMixin
 
@@ -16,12 +16,17 @@ _lock = threading.Lock()
 _counters: dict[str, int] = defaultdict(int)
 _latency_buckets = {"p50": [], "p95": [], "p99": []}
 _MAX_LATENCY_SAMPLES = 500
+_in_flight = 0
+_recent: deque[tuple[float, int]] = deque(maxlen=10000)
 
 
 class RequestContextMiddleware(MiddlewareMixin):
     def process_request(self, request):
+        global _in_flight
         request.correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
         request.started_at = time.perf_counter()
+        with _lock:
+            _in_flight += 1
 
     def process_response(self, request, response):
         correlation_id = getattr(request, "correlation_id", "")
@@ -33,11 +38,15 @@ class RequestContextMiddleware(MiddlewareMixin):
         response["X-Content-Type-Options"] = "nosniff"
 
         with _lock:
+            global _in_flight
+            _in_flight = max(0, _in_flight - 1)
             _counters[f"http_requests_total|{request.method}|{response.status_code}"] += 1
+            _counters[f"http_responses_total|{request.method}|{response.status_code}"] += 1
             if 400 <= response.status_code < 500:
                 _counters["http_4xx_total"] += 1
             if response.status_code >= 500:
                 _counters["http_5xx_total"] += 1
+            _recent.append((time.time(), response.status_code))
             _latency_buckets["p50"].append(elapsed_ms)
             if len(_latency_buckets["p50"]) > _MAX_LATENCY_SAMPLES:
                 _latency_buckets["p50"].pop(0)
@@ -62,12 +71,18 @@ def record_analysis(status: str) -> None:
 
 def render_metrics() -> str:
     lines: list[str] = []
+    cutoff = time.time() - 60.0
     with _lock:
         for key, value in sorted(_counters.items()):
             if key.startswith("http_requests_total|"):
                 _, method, status_code = key.split("|")
                 lines.append(
                     f'http_requests_total{{method="{method}",status="{status_code}"}} {value}'
+                )
+            elif key.startswith("http_responses_total|"):
+                _, method, status_code = key.split("|")
+                lines.append(
+                    f'http_responses_total{{method="{method}",status="{status_code}"}} {value}'
                 )
             else:
                 metric = key.split("|")[0]
@@ -77,6 +92,15 @@ def render_metrics() -> str:
                     lines.append(f"{metric}{{{label_text}}} {value}")
                 else:
                     lines.append(f"{metric} {value}")
+
+        recent_requests = sum(1 for ts, _ in _recent if ts >= cutoff)
+        recent_errors = sum(1 for ts, status in _recent if ts >= cutoff and status >= 400)
+        error_rate = (recent_errors / recent_requests) if recent_requests else 0.0
+
+        lines.append(f"http_requests_in_flight {_in_flight}")
+        lines.append(f"http_requests_last_60s {recent_requests}")
+        lines.append(f"http_errors_last_60s {recent_errors}")
+        lines.append(f"http_error_rate_last_60s {error_rate:.4f}")
         samples = sorted(_latency_buckets["p50"])
     if samples:
 

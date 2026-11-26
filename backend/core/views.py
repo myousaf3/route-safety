@@ -24,10 +24,15 @@ from core.middleware import render_metrics
 from core.models import RouteAnalysis
 from core.payloads import analysis_detail_payload
 from core.serializers import AnalysisRequestSerializer, HistoryItemSerializer
-from core.services.analysis import SPACINGS, run_analysis
+from core.services.analysis import (
+    SPACINGS,
+    _validate_departure,
+    create_queued_analysis,
+)
 from core.services.geocoding import search_places
 from core.services.http import ProviderError
 from core.services.risk import RISK_LABELS, RiskLevel
+from core.tasks import process_analysis_task
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +58,8 @@ class AnalysisListCreateView(APIView):
             .annotate(route_count=Count("routes"))
             .all()
         )
+        if request.user.is_authenticated:
+            queryset = queryset.filter(owner__in=[request.user, None])
         status_filter = request.query_params.get("status")
         if status_filter:
             if status_filter not in RouteAnalysis.Status.values:
@@ -88,20 +95,24 @@ class AnalysisListCreateView(APIView):
         serializer = AnalysisRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        analysis = run_analysis(
+        _validate_departure(data["departure"])
+        analysis = create_queued_analysis(
             origin_query=data["origin"],
             destination_query=data["destination"],
             departure_utc=data["departure"],
             load_weight_lb=data["load_weight_lb"],
             spacing_miles=data.get("spacing_miles", 25),
+            owner=request.user if request.user.is_authenticated else None,
         )
+        process_analysis_task.delay(str(analysis.id))
+
         analysis = (
             RouteAnalysis.objects.select_related("recommended_route")
             .prefetch_related("routes__checkpoints")
-            .get(pk=analysis.pk)
+            .get(pk=analysis.id)
         )
         payload = analysis_detail_payload(analysis)
-        response = Response(payload, status=status.HTTP_201_CREATED)
+        response = Response(payload, status=status.HTTP_202_ACCEPTED)
         response["Location"] = f"/api/v1/analyses/{analysis.id}/"
         return response
 

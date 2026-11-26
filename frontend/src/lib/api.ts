@@ -39,6 +39,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
   if (init?.body) headers.set("Content-Type", "application/json");
+  const token = localStorage.getItem("spotter_access_token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   let response: Response;
   try {
@@ -105,4 +107,45 @@ export function searchPlaces(query: string, signal?: AbortSignal): Promise<Place
 
 export function fetchPolicy(): Promise<Policy> {
   return request<Policy>("/policy/");
+}
+
+export interface AuthTokens {
+  access: string;
+  refresh: string;
+}
+
+export function login(username: string, password: string): Promise<AuthTokens> {
+  return request<AuthTokens>("/auth/token/", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export function register(
+  username: string,
+  password: string,
+  email?: string,
+): Promise<AuthTokens> {
+  return request<AuthTokens>("/auth/register/", {
+    method: "POST",
+    body: JSON.stringify({ username, password, email }),
+  });
+}
+
+export function refreshToken(refresh: string): Promise<{ access: string }> {
+  return request<{ access: string }>("/auth/token/refresh/", {
+    method: "POST",
+    body: JSON.stringify({ refresh }),
+  });
+}
+
+export interface AuthUser {
+  authenticated: boolean;
+  id?: number;
+  username?: string;
+  email?: string;
+}
+
+export function fetchMe(): Promise<AuthUser> {
+  return request<AuthUser>("/auth/me/");
 }
