@@ -1,5 +1,9 @@
 # Loom Video Script — Spotter Weather-Aware Truck Routing (2 minutes)
 
+## Opening paragraph (say this in the first 10–15 seconds, before the demo)
+
+"Hi — I'm Yousaf, and this is Spotter, a weather-aware truck routing app I built for the Spotter full-stack assessment. The core idea is simple but the engineering is not: instead of asking 'what's the weather today,' Spotter asks 'what weather will this specific truck meet at each point on each route, at the exact time it arrives.' It compares three route alternatives, scores risk in miles at 10-mile checkpoints, and recommends the safest — all through an async, production-grade pipeline with JWT auth, owner-scoped history, observability, and a live deployment on Railway and Cloudflare. Let me walk you through it."
+
 Target: ~260 spoken words (~130 wpm). Record against the live deployment
 (`https://route-safety.pages.dev` + Railway API) so reviewers see real provider calls.
 
